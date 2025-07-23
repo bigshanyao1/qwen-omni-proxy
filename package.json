@@ -1,0 +1,30 @@
+{
+  "name": "qwen-omni-realtime-proxy",
+  "version": "1.0.0",
+  "description": "通义千问 Omni Realtime API 代理服务器",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "build": "echo 'No build step required'",
+    "test": "echo 'No tests specified'"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2",
+    "cors": "^2.8.5"
+  },
+  "keywords": [
+    "qwen",
+    "realtime",
+    "websocket",
+    "proxy",
+    "ai",
+    "voice"
+  ],
+  "author": "AI Assistant",
+  "license": "MIT"
+}
