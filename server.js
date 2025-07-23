@@ -58,18 +58,22 @@ wss.on('connection', (clientWs, request) => {
     // 连接到通义千问 API
     const qwenUrl = `${QWEN_API_URL}?model=${model}`;
     console.log('🌐 连接到 Qwen API:', qwenUrl);
+    console.log('🔑 使用 API Key:', QWEN_API_KEY ? `${QWEN_API_KEY.substring(0, 20)}...` : '未设置');
     
     const qwenWs = new WebSocket(qwenUrl, {
         headers: {
             'Authorization': `Bearer ${QWEN_API_KEY}`,
-            'User-Agent': 'QwenProxy/1.0'
+            'User-Agent': 'QwenProxy/1.0',
+            'Origin': 'https://qwen-omni-proxy-production.up.railway.app'
         },
-        timeout: 30000
+        timeout: 10000,
+        handshakeTimeout: 10000
     });
     
     // 连接状态跟踪
     let isConnected = false;
     let lastActivity = Date.now();
+    let messageQueue = []; // 消息队列
     
     // 通义千问 WebSocket 事件处理
     qwenWs.on('open', () => {
@@ -84,6 +88,35 @@ wss.on('connection', (clientWs, request) => {
                 timestamp: new Date().toISOString()
             }));
         }
+        
+        // 处理队列中的消息
+        while (messageQueue.length > 0 && qwenWs.readyState === WebSocket.OPEN) {
+            const queuedMessage = messageQueue.shift();
+            console.log('📤 发送队列消息:', queuedMessage.substring(0, 100) + '...');
+            qwenWs.send(queuedMessage);
+        }
+        
+        // 立即发送会话初始化
+        setTimeout(() => {
+            if (qwenWs.readyState === WebSocket.OPEN) {
+                const sessionConfig = {
+                    type: "session.update",
+                    event_id: "event_" + Date.now(),
+                    session: {
+                        modalities: ["text", "audio"],
+                        voice: "Ethan",
+                        input_audio_format: "pcm16",
+                        output_audio_format: "pcm16",
+                        input_audio_transcription: {
+                            model: "gummy-realtime-v1"
+                        },
+                        turn_detection: null
+                    }
+                };
+                qwenWs.send(JSON.stringify(sessionConfig));
+                console.log('📝 已发送会话配置');
+            }
+        }, 100);
     });
     
     qwenWs.on('message', (data) => {
@@ -97,13 +130,27 @@ wss.on('connection', (clientWs, request) => {
     
     qwenWs.on('error', (error) => {
         console.error('❌ Qwen WebSocket 错误:', error.message);
+        console.error('错误详情:', error);
+        console.error('API Key 检查:', QWEN_API_KEY ? `有效 (${QWEN_API_KEY.substring(0, 10)}...)` : '未设置');
         
         if (clientWs.readyState === WebSocket.OPEN) {
+            let errorMessage = '代理连接错误: ' + error.message;
+            
+            // 根据错误类型提供更具体的信息
+            if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+                errorMessage = 'API Key 无效或已过期，请检查API密钥';
+            } else if (error.message.includes('403') || error.message.includes('Forbidden')) {
+                errorMessage = 'API访问被拒绝，请检查API权限';
+            } else if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
+                errorMessage = '连接超时，请稍后重试';
+            }
+            
             clientWs.send(JSON.stringify({
                 type: 'error',
                 error: { 
-                    message: '代理连接错误: ' + error.message,
-                    code: 'PROXY_ERROR'
+                    message: errorMessage,
+                    code: 'PROXY_ERROR',
+                    details: error.message
                 }
             }));
         }
@@ -125,13 +172,18 @@ wss.on('connection', (clientWs, request) => {
         
         if (qwenWs.readyState === WebSocket.OPEN) {
             qwenWs.send(data);
+        } else if (qwenWs.readyState === WebSocket.CONNECTING) {
+            // 如果正在连接，加入队列
+            console.log('⏳ Qwen 正在连接中，消息加入队列');
+            messageQueue.push(data.toString());
         } else {
             console.warn('⚠️ Qwen 连接未就绪, 状态:', qwenWs.readyState);
             clientWs.send(JSON.stringify({
                 type: 'error',
                 error: { 
-                    message: 'Qwen API 连接未就绪',
-                    code: 'NOT_READY'
+                    message: 'Qwen API 连接未就绪，请稍后重试',
+                    code: 'NOT_READY',
+                    readyState: qwenWs.readyState
                 }
             }));
         }
